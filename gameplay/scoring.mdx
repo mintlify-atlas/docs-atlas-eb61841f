@@ -1,0 +1,89 @@
+---
+title: "Scoring"
+description: "How points are earned in Squiggle — guesser bonuses, drawer rewards, streaks, and the final leaderboard."
+---
+
+All scoring is handled server-side in `app/api/game/route.ts`. Clients cannot write their own scores — every point award goes through the `guess` action on the API, which validates the guess, calculates points, and updates Firestore directly using the Admin SDK.
+
+## Guesser points
+
+When a player guesses the word correctly, they earn points based on the order in which they guessed. The first correct guesser earns the most; later guessers earn less.
+
+```typescript
+const GUESS_SCORES = [500, 400, 350, 300, 250, 200, 175, 150, 125, 100];
+```
+
+| Guess order | Points |
+|---|---|
+| 1st | 500 |
+| 2nd | 400 |
+| 3rd | 350 |
+| 4th | 300 |
+| 5th | 250 |
+| 6th | 200 |
+| 7th | 175 |
+| 8th | 150 |
+| 9th | 125 |
+| 10th or later | 100 |
+
+The guess order for a round is tracked via `currentRound.guessCount` on the room document. Each correct guess increments this count server-side.
+
+<Note>
+  Guess validation is case-insensitive. `"APPLE"`, `"apple"`, and `"Apple"` are all treated as the same answer.
+</Note>
+
+## Drawer reward
+
+The drawer earns **+50 points** each time any other player guesses correctly. These points accumulate throughout the round — if 4 players guess correctly, the drawer earns 200 points total.
+
+Drawer points are written by the server in the same transaction as the guesser's score update, using the `drawerId` stored in `currentRound`.
+
+## Streak tracking
+
+Each player has a `streak` field on their `Player` document. It increments by 1 each time they guess correctly:
+
+```typescript
+interface Player {
+  score: number;
+  streak: number;  // incremented on each correct guess
+  // ...
+}
+```
+
+Streaks are reset to 0 at the start of each game (`startGame` writes `streak: 0` to all player documents). The streak value is stored but is currently used for display and tracking — it does not apply a bonus multiplier in the current scoring implementation.
+
+## Score display during the game
+
+Scores are visible at all times in the **player strip** at the bottom of the screen. Each player card shows their current point total. The strip auto-scrolls to center the current drawer when turns change.
+
+During the drawing phase, the chat panel displays a **guess queue** showing everyone who has guessed correctly so far, in order, along with their avatar, the timestamp when they guessed, and the points they earned.
+
+## Final leaderboard
+
+When the game reaches the `ended` phase, the final scores screen is shown. Players are sorted by score descending. The top three finishers are awarded medals:
+
+| Place | Medal |
+|---|---|
+| 1st | Gold |
+| 2nd | Silver |
+| 3rd | Bronze |
+
+The winner's name and score are highlighted at the top of the screen. All players are listed below in a ranked table.
+
+From the ended screen, the host can click **Play Again** to return the room to the `lobby` phase with scores reset, or players can click **Leave** to return to the landing page.
+
+<Tip>
+  Scores reset to 0 at the start of each new game via a Firestore batch write in `startGame`. The streaks are also reset at this point.
+</Tip>
+
+## Points a player can earn in one round
+
+As an example, in a 6-player game where you are the drawer and all 5 other players guess correctly:
+
+- You earn **50 × 5 = 250 points** as the drawer.
+
+As a guesser who answers first in that same round:
+
+- You earn **500 points** for the correct guess.
+
+Point totals accumulate across all rounds and all turns.

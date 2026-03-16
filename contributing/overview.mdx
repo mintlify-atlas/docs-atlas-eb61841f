@@ -1,0 +1,129 @@
+---
+title: "Contributing"
+description: "How to contribute to Squiggle — bug reports, feedback, and code contributions."
+---
+
+Contributions are welcome in any form: bug reports, feature feedback, or pull requests. Squiggle is licensed under [AGPL v3](https://github.com/thor-op/squiggle/blob/main/LICENSE) — read the [license implications](#license-implications) before submitting code.
+
+## Ways to contribute
+
+<CardGroup cols={3}>
+  <Card title="Report a bug" icon="bug" href="https://github.com/thor-op/squiggle/issues/new?template=bug_report.yml">
+    Open a bug report on GitHub using the structured template. Include steps to reproduce, expected vs. actual behavior, and browser/device info.
+  </Card>
+  <Card title="Give feedback" icon="message-circle" href="https://github.com/thor-op/squiggle/issues/new?template=feedback.yml">
+    Share feature ideas, UX suggestions, or general feedback using the feedback template.
+  </Card>
+  <Card title="Browse issues" icon="list" href="https://github.com/thor-op/squiggle/issues">
+    Browse open issues to find bugs to fix, features to build, or discussions to join.
+  </Card>
+</CardGroup>
+
+## Code contributions
+
+<Steps>
+  <Step title="Fork the repository">
+    Fork [thor-op/squiggle](https://github.com/thor-op/squiggle) on GitHub, then clone your fork locally.
+
+    ```bash
+    git clone https://github.com/your-username/squiggle.git
+    cd squiggle
+    npm install
+    ```
+  </Step>
+
+  <Step title="Create a feature branch">
+    Create a branch with a short, descriptive name. Use a `fix/` prefix for bug fixes and `feat/` for new features.
+
+    ```bash
+    git checkout -b feat/your-feature-name
+    # or
+    git checkout -b fix/your-bug-name
+    ```
+  </Step>
+
+  <Step title="Make your changes">
+    Make your changes in the codebase. Keep changes focused — one logical change per pull request makes review easier.
+
+    Follow the code style guidelines below:
+    - All code is TypeScript with `strict: true` enabled (`tsconfig.json`)
+    - ESLint is configured via `eslint.config.mjs` using `eslint-config-next`
+    - Tailwind CSS v4 is used for styling — avoid inline styles
+    - Server-side logic belongs in `app/api/game/route.ts` or `lib/firebaseAdmin.ts`, not in client components
+    - Word bank access must stay server-side only — never import or reference word data in client bundles
+  </Step>
+
+  <Step title="Lint your changes">
+    Run the linter and fix any reported issues before committing.
+
+    ```bash
+    npm run lint
+    ```
+
+    ESLint is configured with `eslint-config-next`, which includes React, React Hooks, and Next.js-specific rules.
+  </Step>
+
+  <Step title="Run a production build">
+    Verify the build completes without errors. This catches TypeScript type errors and Next.js build-time issues that the dev server may not surface.
+
+    ```bash
+    npm run build
+    ```
+  </Step>
+
+  <Step title="Submit a pull request">
+    Push your branch to your fork and open a pull request against `main` on the upstream repository.
+
+    ```bash
+    git push origin feat/your-feature-name
+    ```
+
+    In the PR description, explain:
+    - What problem does this solve or what does it add?
+    - How did you test it?
+    - Any known limitations or follow-up work?
+
+    Link to the relevant issue if one exists (e.g. `Closes #42`).
+  </Step>
+</Steps>
+
+## Code style
+
+Squiggle uses TypeScript 5 with strict mode enabled. The relevant compiler flags are:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2017",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve"
+  }
+}
+```
+
+ESLint extends `eslint-config-next`:
+
+```mjs eslint.config.mjs
+import { defineConfig } from "eslint/config";
+import next from "eslint-config-next";
+
+export default defineConfig([{
+    extends: [...next],
+}]);
+```
+
+<Tip>
+  Run `npm run lint` before every commit. The CI build also runs the linter, so unresolved lint errors will block your PR.
+</Tip>
+
+## License implications
+
+Squiggle is released under the [GNU Affero General Public License v3.0 (AGPL v3)](https://github.com/thor-op/squiggle/blob/main/LICENSE).
+
+<Warning>
+  AGPL v3 has a network use clause. If you modify Squiggle and deploy it as a network service — even without distributing the binary — you must make your modified source code available to users under the same AGPL v3 license. This applies to forks, hosted versions, and any derivative works.
+</Warning>
+
+By submitting a pull request you agree that your contribution will be licensed under AGPL v3 as part of the Squiggle project.

@@ -1,0 +1,280 @@
+---
+title: "Project structure"
+description: "A map of the Squiggle codebase — where everything lives and why."
+---
+
+Squiggle is a Next.js 15 App Router project. Server-side logic runs in API routes and Firebase Admin SDK calls; client components handle real-time Firestore subscriptions, canvas drawing, and UI state.
+
+## Directory tree
+
+```
+app/
+├── api/game/route.ts       server-side API: word validation, scoring, hints, game actions
+├── room/[roomId]/page.tsx  game room page
+├── layout.tsx              root layout
+├── page.tsx                landing page (create/join room)
+└── globals.css             global styles
+
+components/
+├── Canvas.tsx              drawing canvas (tools, colors, real-time Firestore sync)
+├── Chat.tsx                live chat + guess input
+├── HostControls.tsx        lobby settings panel (host only)
+├── FloatingEmojis.tsx      emoji reaction animations
+├── Corner.tsx              corner UI element
+├── DevToolsMsg.tsx         developer tools message
+└── RoomDoodles.tsx         decorative background doodles
+
+lib/
+├── firebase.ts             Firestore client instance
+├── firebaseAdmin.ts        Firebase Admin SDK init (server-side only)
+├── gameLogic.ts            room creation, turn management, chat, game flow
+├── types.ts                shared TypeScript types
+├── words.ts                getWordMask utility (client-safe)
+├── sounds.ts               Web Audio API sound effects
+└── store.ts                sessionStorage helpers (player name, avatar, room ID)
+
+scripts/
+├── seed-words.example.ts   template for seeding the word bank
+└── seed-words.ts           your actual word bank (gitignored)
+```
+
+## `app/` — pages and API routes
+
+`app/page.tsx` is the landing page. Players enter a display name and avatar, then either create a new room (which generates a random 6-character code via `generateRoomId()` in `lib/store.ts`) or join an existing one by entering a room code.
+
+`app/room/[roomId]/page.tsx` is the main game room. It subscribes to Firestore in real time — the `rooms/{roomId}` document, the `rooms/{roomId}/players` sub-collection, and `rooms/{roomId}/chat`. All game-phase transitions (`lobby → choosing → drawing → reveal → ended`) are reflected immediately across all connected clients because each client listens to the same Firestore document.
+
+`app/api/game/route.ts` is the only server-side API endpoint. It handles all actions that must not run client-side:
+
+| Action | What it does |
+|---|---|
+| `getWordChoices` | Fetches words from `wordBank/{category}` in Firestore via the Admin SDK and returns `wordCount` random choices to the drawer |
+| `selectWord` | Stores the chosen word server-side, sets the `wordMask` and `wordLength` in `currentRound`, and transitions the room to `drawing` phase |
+| `guess` | Normalises and compares the player's guess to the secret word, awards points based on guess order and time remaining, and marks the player as having guessed |
+| `endRound` | Transitions the room to `reveal` phase and exposes the word |
+| `hint` | Calls `revealHintLetter` to expose one additional letter in the word mask |
+
+<Note>
+  The secret word never leaves the server. The client only ever receives the `wordMask` (underscores) and `wordLength` from Firestore. Firestore rules block direct client reads on the `wordBank` collection.
+</Note>
+
+## `components/` — UI and canvas
+
+**`Canvas.tsx`** is the most complex component. It renders an HTML5 `<canvas>` element and supports six drawing tools: `pen`, `eraser`, `fill`, `circle`, `rect`, and `line`. It uses 18 preset colors. The active stroke and completed strokes are serialised to JSON and written to `rooms/{roomId}/canvas/main` in Firestore on every pointer event. All connected clients subscribe to that document via `onSnapshot` and re-render the canvas whenever it changes. The fill tool uses a flood-fill algorithm that operates directly on `ImageData`.
+
+**`Chat.tsx`** handles both chat messages and guess submission during the drawing phase. During a round, all guesses go to the server (`/api/game` with `action: 'guess'`) rather than being written directly to Firestore. This keeps the word validation server-side. Messages from players who have already guessed correctly are marked `isGuessOnly: true` so they are only visible to other players who have also guessed.
+
+**`HostControls.tsx`** renders the lobby settings panel, visible only to the room host. It allows configuring rounds, draw time, hints, hint interval, word count, max players, word categories, and custom words. Settings are written to `rooms/{roomId}/settings` in Firestore.
+
+**`FloatingEmojis.tsx`** renders animated emoji reactions. Players can react during a round; reactions are stored in `rooms/{roomId}/reactions` as `Record<string, { emoji: string; timestamp: number }>` and rendered using the `motion` library.
+
+**`RoomDoodles.tsx`** renders decorative background SVG doodles on the landing and lobby pages. It has no game logic.
+
+**`Corner.tsx`** renders a corner UI element (used for room code display and related controls).
+
+**`DevToolsMsg.tsx`** renders a message in the browser's developer tools console.
+
+## `lib/` — shared logic
+
+**`firebase.ts`** initialises the Firebase client SDK and exports the Firestore `db` instance. It reads the Firebase project config from `NEXT_PUBLIC_*` environment variables. Supports a custom Firestore database ID via `NEXT_PUBLIC_FIREBASE_FIRESTORE_DB` (falls back to `(default)`).
+
+**`firebaseAdmin.ts`** exports `initAdminApp()`, a guard-wrapped initialiser for the Firebase Admin SDK. It is called at the top of `app/api/game/route.ts` before any Admin Firestore access. Admin credentials come from `FIREBASE_ADMIN_*` environment variables and are never exposed to the client.
+
+**`gameLogic.ts`** contains all client-initiated Firestore writes for game flow:
+
+- `createOrJoinRoom` — creates the room document and canvas sub-document on first join, enforces max players on subsequent joins, and writes the player document.
+- `startGame` — shuffles players to set a fixed `turnOrder`, fetches the first drawer's word choices from the API, resets scores, and transitions to `choosing` phase.
+- `nextTurn` — advances the turn order, increments the round counter, and checks whether the game is over. If the next player in `turnOrder` has disconnected, it falls back to the next available player.
+- `selectWord` — delegates to `/api/game` so the word is never sent to the client.
+- `endRound` — delegates to `/api/game`.
+- `sendChatMessage` — routes guesses through `/api/game` and posts non-guess messages directly to the `chat` sub-collection.
+- `sendSystemMessage` — writes system messages (join notifications, round start announcements) directly to the `chat` sub-collection.
+- `revealHintLetter` — a pure function that reveals one random hidden letter in a word mask string.
+
+**`words.ts`** contains only `getWordMask(word)`, which replaces every letter in a word with `_` while preserving spaces. This utility is safe to bundle client-side because it contains no word data — it just performs string manipulation for display purposes.
+
+**`sounds.ts`** exports `playSound(type)`, which generates synthesised audio using the Web Audio API. No audio files are loaded. The five sound types are:
+
+| Type | Waveform | Description |
+|---|---|---|
+| `join` | sine | Short ascending tone when a player joins |
+| `correct` | triangle | Four-note C major arpeggio on a correct guess |
+| `endRound` | square | Descending tone at round end |
+| `endGame` | sine | Four-note ascending fanfare at game end |
+| `tick` | square | Short click for the countdown timer |
+
+**`store.ts`** manages ephemeral player identity using `sessionStorage`. It generates and persists a random `playerId` for the browser session, stores and retrieves the player's display name and avatar choice, and exports `generateRoomId()` which generates a random 6-character alphanumeric room code.
+
+## `scripts/` — word bank seeding
+
+`scripts/seed-words.example.ts` is the committed template. It shows the expected shape of the word bank:
+
+```typescript
+const WORD_BANK: Record<string, { word: string; difficulty: string }[]> = {
+  Animals: [
+    { word: "dog", difficulty: "easy" },
+    { word: "elephant", difficulty: "medium" },
+    { word: "kangaroo", difficulty: "hard" },
+  ],
+  Food: [
+    { word: "pizza", difficulty: "easy" },
+    { word: "croissant", difficulty: "hard" },
+  ],
+};
+```
+
+Words are written to `wordBank/{category}` in Firestore using the Admin SDK. `scripts/seed-words.ts` (your actual word list) is gitignored so your words stay private. Copy the example and fill it in:
+
+```bash
+cp scripts/seed-words.example.ts scripts/seed-words.ts
+# edit scripts/seed-words.ts
+npm run seed
+```
+
+## TypeScript types
+
+All shared types live in `lib/types.ts`. These types are used across client components, server API routes, and `lib/gameLogic.ts`.
+
+<AccordionGroup>
+  <Accordion title="Phase">
+    A string union that represents the current state of a room.
+
+    ```typescript
+    type Phase = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'ended';
+    ```
+
+    | Value | Description |
+    |---|---|
+    | `lobby` | Room created, players joining, host configuring settings |
+    | `choosing` | The current drawer is presented with word choices |
+    | `drawing` | Active round — drawer is drawing, others are guessing |
+    | `reveal` | Round ended — the word is revealed to all players |
+    | `ended` | All rounds complete, final scores shown |
+  </Accordion>
+
+  <Accordion title="RoomSettings">
+    Host-configurable settings stored on the room document.
+
+    ```typescript
+    interface RoomSettings {
+      rounds: number;        // number of rounds (each player draws once per round)
+      drawTime: number;      // seconds per drawing turn
+      hints: number;         // number of hint letters revealed during a turn
+      hintInterval: number;  // seconds between each hint reveal
+      wordCount: number;     // how many word choices the drawer sees
+      maxPlayers: number;    // maximum players allowed in the room
+      categories: string[];  // Firestore wordBank categories to draw from
+      customWords: string;   // newline- or comma-separated custom words
+      password?: string;     // optional room password
+    }
+    ```
+
+    Default values set on room creation: `rounds: 3`, `drawTime: 80`, `hints: 2`, `hintInterval: 20`, `wordCount: 3`, `maxPlayers: 8`, `categories: ['Animals', 'Food', 'Objects']`.
+  </Accordion>
+
+  <Accordion title="CurrentRound">
+    State for the active drawing turn, written to the room document.
+
+    ```typescript
+    interface CurrentRound {
+      drawerId: string;    // player ID of the current drawer
+      wordMask: string;    // underscored word shown to guessers, e.g. "_ _ _ _"
+      wordLength: number;  // character count of the secret word
+      startedAt: number;   // Unix timestamp (ms) when drawing phase began
+      timeLimit: number;   // seconds allocated for this turn
+      roundNumber: number; // current round index (1-based)
+      guessCount: number;  // how many players have guessed correctly so far
+    }
+    ```
+
+    `wordMask` is updated server-side as hints are revealed. The secret word itself is never written to the room document.
+  </Accordion>
+
+  <Accordion title="Room">
+    The top-level Firestore document at `rooms/{roomId}`.
+
+    ```typescript
+    interface Room {
+      id: string;
+      hostId: string;
+      phase: Phase;
+      settings: RoomSettings;
+      currentRound?: CurrentRound;
+      wordChoices?: string[];  // word options shown only to the drawer during 'choosing'
+      reveal?: { word: string };  // exposed after round ends
+      votes?: {
+        skip?: Record<string, boolean>;  // playerId → true for skip votes
+      };
+      reactions?: Record<string, { emoji: string; timestamp: number }>;
+      turnOrder?: string[];  // fixed player ID order set at game start
+      createdAt: number;
+      lastActive: number;
+    }
+    ```
+
+    `wordChoices` is only visible to the drawer (Firestore rules restrict access). `turnOrder` is shuffled once at game start and reused throughout all rounds to ensure consistent turn progression.
+  </Accordion>
+
+  <Accordion title="Player">
+    A player document stored in the `rooms/{roomId}/players` sub-collection.
+
+    ```typescript
+    interface Player {
+      id: string;
+      name: string;
+      avatarId: string;
+      score: number;
+      streak: number;    // consecutive correct guesses
+      connected: boolean;
+      isHost: boolean;
+      hasGuessed: boolean;  // true once the player guesses correctly in the current round
+    }
+    ```
+
+    `hasGuessed` is reset to `false` at the start of each new turn. `score` and `streak` persist across the whole game and are reset to `0` when a new game starts.
+  </Accordion>
+
+  <Accordion title="ChatMessage">
+    A message document stored in the `rooms/{roomId}/chat` sub-collection.
+
+    ```typescript
+    interface ChatMessage {
+      id: string;
+      text: string;
+      senderId: string;
+      senderName: string;
+      isSystem: boolean;      // true for join/round-start announcements
+      isCorrect: boolean;     // true if this message was a correct guess
+      isGuessOnly: boolean;   // true = only visible to players who have already guessed
+      guessOrder?: number;    // 1 for first guesser, 2 for second, etc.
+      pointsEarned?: number;  // points awarded for this guess
+      roundTimestamp?: number; // seconds elapsed in the round when guessed
+      timestamp: number;       // Unix timestamp (ms)
+    }
+    ```
+
+    `isGuessOnly` is the mechanism that prevents unguessed players from seeing correct guesses in the chat — they would reveal the word to players who haven't guessed yet.
+  </Accordion>
+
+  <Accordion title="Stroke and CanvasState">
+    Types used to serialise canvas drawing data to Firestore.
+
+    ```typescript
+    interface Stroke {
+      tool: string;   // 'pen' | 'eraser' | 'fill' | 'circle' | 'rect' | 'line'
+      color: string;  // hex color, e.g. '#ef4444'
+      size: number;   // brush size in pixels
+      points: { x: number; y: number }[];  // normalised coordinates
+    }
+
+    interface CanvasState {
+      completedStrokes: string;    // JSON-serialised Stroke[]
+      activeStroke: string | null; // JSON-serialised in-progress Stroke, or null
+      clearedAt: number;           // timestamp of the last canvas clear
+      lastUpdate: number;          // timestamp of the last write
+    }
+    ```
+
+    `CanvasState` lives in the Firestore document `rooms/{roomId}/canvas/main`. `completedStrokes` is a JSON string rather than a Firestore array to avoid hitting Firestore's per-document write rate limits on high-frequency pointer events. Each pointer move updates `activeStroke`; on pointer-up, the stroke is appended to `completedStrokes` and `activeStroke` is cleared.
+  </Accordion>
+</AccordionGroup>

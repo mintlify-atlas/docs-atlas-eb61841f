@@ -1,0 +1,262 @@
+---
+title: "Firestore Security Rules"
+description: "Understand and deploy the Firestore security rules that protect Squiggle."
+---
+
+Squiggle's Firestore rules enforce anti-cheat protections and data integrity entirely at the database level — no custom auth or cloud functions required.
+
+## The rules file
+
+```js firestore.rules
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidRoom() {
+      return hasRequiredFields(['hostId', 'phase', 'createdAt', 'lastActive']) &&
+             request.resource.data.phase in ['lobby', 'choosing', 'drawing', 'reveal', 'ended'] &&
+             request.resource.data.hostId is string &&
+             request.resource.data.createdAt is number &&
+             request.resource.data.lastActive is number;
+    }
+
+    function isValidPlayer() {
+      return hasRequiredFields(['name', 'avatarId', 'score', 'streak', 'connected', 'isHost', 'hasGuessed']) &&
+             request.resource.data.name is string &&
+             request.resource.data.name.size() > 0 &&
+             request.resource.data.name.size() <= 20 &&
+             request.resource.data.avatarId is string &&
+             request.resource.data.score is number &&
+             request.resource.data.score >= 0 &&
+             // Prevent score manipulation on updates only (resource is null on create)
+             (
+               resource == null ||
+               (request.resource.data.score - resource.data.score) <= 500
+             ) &&
+             request.resource.data.streak is number &&
+             request.resource.data.streak >= 0 &&
+             request.resource.data.connected is bool &&
+             request.resource.data.isHost is bool &&
+             request.resource.data.hasGuessed is bool;
+    }
+
+    function isValidChatMessage() {
+      return hasRequiredFields(['text', 'senderId', 'senderName', 'isSystem', 'isCorrect', 'timestamp']) &&
+             request.resource.data.text is string &&
+             request.resource.data.text.size() > 0 &&
+             request.resource.data.text.size() <= 200 &&
+             request.resource.data.senderId is string &&
+             request.resource.data.senderName is string &&
+             request.resource.data.isSystem is bool &&
+             request.resource.data.isCorrect is bool &&
+             request.resource.data.timestamp is number &&
+             // Clients cannot fake a correct guess — isCorrect is set server-side only
+             request.resource.data.isCorrect == false;
+    }
+
+    function isValidCanvas() {
+      return hasRequiredFields(['lastUpdate']) &&
+             request.resource.data.lastUpdate is number;
+    }
+
+    function isValidSecretWord() {
+      return hasRequiredFields(['value']) &&
+             request.resource.data.value is string &&
+             request.resource.data.value.size() > 0 &&
+             request.resource.data.value.size() <= 100;
+    }
+
+    // Word bank is seeded via admin SDK — clients must never read it
+    match /wordBank/{category} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if isValidRoom();
+      allow update: if isValidRoom();
+      allow delete: if true;
+
+      match /players/{playerId} {
+        allow read: if true;
+        allow create: if isValidPlayer();
+        allow update: if isValidPlayer();
+        allow delete: if true;
+      }
+
+      match /chat/{messageId} {
+        allow read: if true;
+        // Only allow non-system, non-correct messages from clients.
+        // isCorrect and isSystem are set server-side (via gameLogic running on host client).
+        // The rule enforces isCorrect=false and isSystem=false for direct writes,
+        // which means only the game logic path (which sets these via trusted writes) works.
+        allow create: if isValidChatMessage();
+        allow update: if false;
+        allow delete: if true;
+      }
+
+      match /canvas/{canvasId} {
+        allow read: if true;
+        allow create: if isValidCanvas();
+        allow update: if isValidCanvas();
+        allow delete: if true;
+      }
+
+      match /secrets/{secretId} {
+        // Word is now stored server-side only (API route + firebase-admin).
+        // No client should ever read or write this directly.
+        allow read: if false;
+        allow write: if false;
+      }
+    }
+  }
+}
+```
+
+## Rule-by-rule explanation
+
+### `wordBank` collection
+
+```js
+match /wordBank/{category} {
+  allow read: if false;
+  allow write: if false;
+}
+```
+
+The word bank is the core of Squiggle's anti-cheat design. Words are seeded into Firestore using the Admin SDK (`npm run seed`) and are **completely inaccessible to browser clients**. Both read and write are blocked unconditionally.
+
+This means a player cannot open DevTools, inspect Firestore, or read the client bundle to find out the current word — the client bundle contains zero words.
+
+### `rooms` collection
+
+```js
+match /rooms/{roomId} {
+  allow read: if true;
+  allow create: if isValidRoom();
+  allow update: if isValidRoom();
+  allow delete: if true;
+}
+```
+
+Rooms are publicly readable so any player with a room code can join. Writes are gated by `isValidRoom()`, which enforces:
+
+- Required fields: `hostId`, `phase`, `createdAt`, `lastActive`
+- `phase` must be one of `lobby`, `choosing`, `drawing`, `reveal`, or `ended` — clients cannot invent new phase values
+- `hostId` must be a string; `createdAt` and `lastActive` must be numbers
+
+### `players` subcollection
+
+```js
+match /players/{playerId} {
+  allow read: if true;
+  allow create: if isValidPlayer();
+  allow update: if isValidPlayer();
+  allow delete: if true;
+}
+```
+
+`isValidPlayer()` enforces field types, name length (1–20 characters), and — critically — **score manipulation protection**:
+
+```js
+// Prevent score manipulation on updates only (resource is null on create)
+(
+  resource == null ||
+  (request.resource.data.score - resource.data.score) <= 500
+)
+```
+
+A single write cannot increase a player's score by more than 500 points. The maximum legitimate score award per correct guess (first guesser bonus included) is well below this cap, so normal gameplay is unaffected while bulk score-stuffing writes are rejected.
+
+### `chat` subcollection
+
+```js
+match /chat/{messageId} {
+  allow read: if true;
+  allow create: if isValidChatMessage();
+  allow update: if false;
+  allow delete: if true;
+}
+```
+
+`isValidChatMessage()` has a key constraint:
+
+```js
+// Clients cannot fake a correct guess — isCorrect is set server-side only
+request.resource.data.isCorrect == false;
+```
+
+Clients can only write messages where `isCorrect` is `false`. The `isCorrect: true` flag that triggers score awards and the congratulatory UI is set exclusively by the server-side API route (`app/api/game/route.ts`) via the Admin SDK, which bypasses these rules. This means a player cannot fake a correct guess by writing directly to Firestore.
+
+Updates to existing messages are also blocked entirely (`allow update: if false`) — chat is append-only.
+
+### `canvas` subcollection
+
+```js
+match /canvas/{canvasId} {
+  allow read: if true;
+  allow create: if isValidCanvas();
+  allow update: if isValidCanvas();
+  allow delete: if true;
+}
+```
+
+`isValidCanvas()` only requires a `lastUpdate` timestamp. The canvas document stores the serialized stroke data and is written frequently by the active drawer. The rule is intentionally permissive on content — any connected client can technically write strokes — but the game UI enforces that only the current drawer has the canvas enabled.
+
+### `secrets` subcollection
+
+```js
+match /secrets/{secretId} {
+  allow read: if false;
+  allow write: if false;
+}
+```
+
+The current round's secret word is stored in this subcollection by the server (Admin SDK) and is never accessible to clients. Both read and write are blocked unconditionally, mirroring the `wordBank` protection.
+
+## Deploying rules
+
+<Steps>
+  <Step title="Log in to Firebase CLI">
+    ```bash
+    npx firebase login
+    ```
+  </Step>
+  <Step title="Select your project">
+    ```bash
+    npx firebase use your-project-id
+    ```
+  </Step>
+  <Step title="Deploy only the rules">
+    ```bash
+    npx firebase deploy --only firestore:rules
+    ```
+
+    This reads `firestore.rules` (the path is set in `firebase.json`) and pushes the compiled ruleset to your Firestore database.
+  </Step>
+</Steps>
+
+<Note>
+  You can also deploy rules from the Firebase console under **Firestore → Rules**, but using the CLI keeps your rules version-controlled and reproducible.
+</Note>
+
+## Why the rules matter
+
+<CardGroup cols={2}>
+  <Card title="Anti-cheat" icon="shield">
+    Players cannot read the word bank or the current round's secret word from Firestore. Correct guess flags are server-only. Score increases are capped per write.
+  </Card>
+  <Card title="Data integrity" icon="check">
+    Room phase values are constrained to a known set. Player names have length limits. Chat messages are append-only and cannot be retroactively marked as correct.
+  </Card>
+</CardGroup>
+
+<Warning>
+  If you deploy Squiggle without pushing these rules — or if you accidentally replace them with a permissive ruleset — clients will be able to read the entire word bank directly from Firestore, bypassing all anti-cheat protections. Always deploy rules before opening a game to real players.
+</Warning>

@@ -1,0 +1,106 @@
+---
+title: "Word Bank"
+description: "Seed and manage the server-side word bank stored in Firestore."
+---
+
+Squiggle's word bank lives entirely in Firestore under the `wordBank/{category}` collection. It is never included in the client bundle — players cannot find words by inspecting the source code or network traffic.
+
+Words are fetched server-side via the Admin SDK in `app/api/game/route.ts` when the server picks a word for a new round. The client only ever receives a `wordMask` (the word represented as underscores) and progressive hints that reveal individual letters over time.
+
+<Note>
+  The security model is enforced at two layers. First, the Firestore security rules deny all client reads and writes on `wordBank/{category}` — no browser can query this collection regardless of how the request is constructed. Second, the seed script uses the Admin SDK, which bypasses security rules and writes directly to Firestore using your service account credentials.
+</Note>
+
+## Seeding the word bank
+
+<Steps>
+  <Step title="Copy the example seed script">
+    The repository includes a template at `scripts/seed-words.example.ts`. Copy it to `scripts/seed-words.ts` — the actual file is gitignored so your word list never ends up in source control.
+
+    ```bash
+    cp scripts/seed-words.example.ts scripts/seed-words.ts
+    ```
+  </Step>
+
+  <Step title="Edit your word list">
+    Open `scripts/seed-words.ts` and fill in the `WORD_BANK` object with your categories and words. Each word has a `difficulty` of `"easy"`, `"medium"`, or `"hard"`.
+
+    ```typescript scripts/seed-words.ts
+    const WORD_BANK: Record<string, { word: string; difficulty: string }[]> = {
+      Animals: [
+        { word: "dog",       difficulty: "easy"   },
+        { word: "cat",       difficulty: "easy"   },
+        { word: "elephant",  difficulty: "medium" },
+        { word: "giraffe",   difficulty: "medium" },
+        { word: "kangaroo",  difficulty: "hard"   },
+      ],
+      Food: [
+        { word: "apple",     difficulty: "easy"   },
+        { word: "pizza",     difficulty: "easy"   },
+        { word: "sushi",     difficulty: "medium" },
+        { word: "croissant", difficulty: "hard"   },
+      ],
+      // Add more categories here...
+    };
+    ```
+
+    The object key becomes the Firestore document ID under `wordBank/` and the category name shown in the host's room settings. The default categories in the example are **Animals**, **Food**, and **Objects** — you can rename, remove, or add as many as you like.
+
+    <Warning>
+      Keep your word list private. `scripts/seed-words.ts` is gitignored, but if you fork the repository or commit the file by mistake, players who can read your repo will be able to find every word. Use a private repository or avoid committing the file.
+    </Warning>
+  </Step>
+
+  <Step title="Run the seed script">
+    Make sure your `.env.local` is configured with valid `FIREBASE_ADMIN_*` credentials (see [Environment Variables](/setup/environment)), then run:
+
+    ```bash
+    npm run seed
+    ```
+
+    The script uses `tsx` to execute `scripts/seed-words.ts`, which loads `.env.local` via `dotenv` and writes each category to Firestore. You will see output like:
+
+    ```
+    ✓ Seeded Animals (5 words)
+    ✓ Seeded Food (4 words)
+
+    Done! Word bank is now stored in Firestore under wordBank/{category}.
+    Make sure your Firestore rules deny client reads on /wordBank/**
+    ```
+
+    To update the word bank later, edit `scripts/seed-words.ts` and re-run `npm run seed`. Each call overwrites the existing document for that category.
+  </Step>
+</Steps>
+
+## Firestore structure
+
+Each category is stored as a single document at `wordBank/{category}` with a `words` array:
+
+```
+wordBank/
+  Animals         → { words: [ { word: "dog", difficulty: "easy" }, ... ] }
+  Food            → { words: [ { word: "pizza", difficulty: "easy" }, ... ] }
+  Objects         → { words: [ { word: "clock", difficulty: "medium" }, ... ] }
+```
+
+The document ID is the category name exactly as it appears in the `WORD_BANK` object keys. When the host selects categories in the room settings, the server fetches the matching documents and draws words from the combined pool.
+
+## Custom words per room
+
+Hosts can add custom words to any room without touching the global word bank. In the lobby, the **Custom words** field in room settings maps to the `customWords` property on the `RoomSettings` object.
+
+Custom words are stored as a newline- or comma-separated string on the room document (e.g. `"saxophone\ntrampoline\nzeppelin"`). The server merges them with the selected category words when picking a word for a new round.
+
+<Tip>
+  Custom words are scoped to a single room and are not added to the Firestore `wordBank` collection. They are readable from the room document, so avoid using them as the sole source of secret words if you want strict anti-cheat. For a competitive game, rely on the seeded word bank.
+</Tip>
+
+## Adding or updating categories
+
+To add a new category:
+
+1. Add a new key and word array to the `WORD_BANK` object in `scripts/seed-words.ts`.
+2. Run `npm run seed` — the new category document is created in Firestore.
+3. Players will see the category name in the host's room settings on the next page load.
+
+To remove a category, delete the corresponding document from the `wordBank` collection in the Firebase console (or add a deletion step to your seed script). Categories that no longer exist in Firestore will be silently ignored if a room still references them.

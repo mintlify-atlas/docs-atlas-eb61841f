@@ -1,0 +1,78 @@
+---
+title: "Rooms"
+description: "Creating, joining, and configuring Squiggle rooms — settings, host controls, and player limits."
+---
+
+## Creating a room
+
+Visit the Squiggle landing page, enter your name (up to 15 characters), and click **Create Private Room**. A random 6-character room code is generated client-side using uppercase letters and digits (e.g. `X4KR9M`). You are automatically the host of the room you create.
+
+Your name and avatar are saved to `sessionStorage` so you don't have to re-enter them if you navigate away and return.
+
+## Joining a room
+
+Enter your name and type an existing 6-character code into the **Room Code** field, then click the play button (or press Enter). The code is case-insensitive — it is converted to uppercase before the join request is made.
+
+If the room does not exist, a 404 screen is shown. If the room is full, a `Room is full` error is thrown before your player document is written.
+
+## Host privileges
+
+The player who creates the room is the host (`isHost: true` on their `Player` document). Only the host sees the `HostControls` panel and can:
+
+- Change room settings before the game starts
+- Click **Start Game** (requires at least 2 players)
+- Click **Play Again** on the game-over screen to return to the lobby
+
+Non-host players see a "Host is configuring..." message in place of the settings panel.
+
+<Note>
+  Host status is tied to the `hostId` field on the room document. If the host leaves, no automatic host transfer occurs in the current implementation — the remaining players will need to wait or leave and create a new room.
+</Note>
+
+## Room settings
+
+All settings are stored under `room.settings` in Firestore and take effect immediately when changed by the host. Settings are applied to the next turn that starts after the change.
+
+<ParamField path="rounds" type="number" default="3">
+  Number of rounds in the game. One round = every player draws once. Configurable from 1 to 10.
+</ParamField>
+
+<ParamField path="drawTime" type="number" default="80">
+  How many seconds the drawing phase lasts per turn, in seconds. Options: 30, 45, 60, 80, 100, 120.
+</ParamField>
+
+<ParamField path="wordCount" type="number" default="3">
+  How many word choices are shown to the drawer during the choosing phase. Options: 2, 3, 4, 5.
+</ParamField>
+
+<ParamField path="maxPlayers" type="number" default="8">
+  Maximum number of players allowed in the room. New join attempts are rejected once this limit is reached. The joining player sees a `Room is full` error.
+</ParamField>
+
+<ParamField path="hints" type="number" default="2">
+  Number of hint letters revealed to guessers during the drawing phase. Set to 0 to disable hints entirely. Options: 0–5.
+</ParamField>
+
+<ParamField path="hintInterval" type="number" default="20">
+  How often a new hint letter is revealed, in seconds. Only visible when `hints` is greater than 0. Options: 10, 15, 20, 25, 30.
+</ParamField>
+
+<ParamField path="categories" type="string[]" default="['Animals', 'Food', 'Objects']">
+  Which word bank categories to draw from. The host can toggle any combination of: Animals, Food, Movies, Tech, Countries, Objects. At least one category must remain selected.
+</ParamField>
+
+<ParamField path="customWords" type="string" default='""'>
+  A comma-separated list of custom words the host provides. These are added to the word pool alongside the selected categories. Example: `apple, banana, cherry`. Custom words are mixed in with category words, not used exclusively.
+</ParamField>
+
+<ParamField path="password" type="string">
+  Optional. If set, players must enter the password to join the room. Not currently exposed in the host controls UI — available on the `RoomSettings` type for future use.
+</ParamField>
+
+## Room capacity enforcement
+
+When a player tries to join an existing room, the server counts existing player documents in `rooms/{roomId}/players`. If the count is at or above `maxPlayers` and the joining player is not already in the room (re-join), the join is rejected with a `Room is full` error before any document is written.
+
+## Room lifecycle
+
+Rooms are created in Firestore with a `createdAt` timestamp. When all players leave (the players subcollection becomes empty), the room and all its subcollections (`canvas`, `chat`, `players`, `secrets`) are deleted via the server-side `deleteRoom` action in `app/api/game/route.ts`.

@@ -1,0 +1,182 @@
+---
+title: "Configuration"
+description: "Configure room defaults, game settings, and word categories for your Squiggle instance."
+---
+
+## Default room settings
+
+When the first player creates a room, `createOrJoinRoom` in `lib/gameLogic.ts` writes the following defaults to Firestore:
+
+```ts lib/gameLogic.ts
+await setDoc(roomRef, {
+  hostId: player.id,
+  phase: 'lobby',
+  settings: {
+    rounds: 3,
+    drawTime: 80,
+    hints: 2,
+    hintInterval: 20,
+    wordCount: 3,
+    maxPlayers: 8,
+    categories: ['Animals', 'Food', 'Objects'],
+    customWords: ''
+  },
+  createdAt: Date.now(),
+  lastActive: Date.now()
+});
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `rounds` | `3` | Number of rounds per game |
+| `drawTime` | `80` | Seconds each player has to draw |
+| `hints` | `2` | Number of letter hints revealed during a round |
+| `hintInterval` | `20` | Seconds between each hint reveal |
+| `wordCount` | `3` | Number of word choices presented to the drawer |
+| `maxPlayers` | `8` | Maximum players allowed in a room |
+| `categories` | `['Animals', 'Food', 'Objects']` | Active word categories |
+| `customWords` | `''` | Host-provided custom words (newline-separated) |
+
+The host can change all of these from the lobby UI before starting the game. These defaults only apply to freshly created rooms.
+
+## Changing the defaults
+
+To change what a new room starts with, edit the `settings` object in `createOrJoinRoom` in `lib/gameLogic.ts`:
+
+```ts lib/gameLogic.ts
+settings: {
+  rounds: 5,          // more rounds
+  drawTime: 60,       // shorter draw time
+  hints: 3,           // more hints
+  hintInterval: 15,   // faster hints
+  wordCount: 4,       // more word choices
+  maxPlayers: 12,     // bigger rooms
+  categories: ['Animals', 'Food', 'Objects', 'Movies'],
+  customWords: ''
+},
+```
+
+<Note>
+  The `hints` and `hintInterval` values work together. With `hints: 2` and `hintInterval: 20`, the first hint appears at 20 seconds, the second at 40 seconds. If `drawTime` is 80 seconds, players have 40 seconds of drawing with both hints visible.
+</Note>
+
+## Default word categories
+
+The three default categories — **Animals**, **Food**, and **Objects** — correspond to document IDs in the `wordBank` Firestore collection. They are populated by the seed script:
+
+```bash
+cp scripts/seed-words.example.ts scripts/seed-words.ts
+# edit scripts/seed-words.ts with your words
+npm run seed
+```
+
+To add a new category:
+
+1. Add the category name to `scripts/seed-words.ts` with its word list
+2. Run `npm run seed` to push it to Firestore
+3. Add the category name to the `categories` default array in `lib/gameLogic.ts` if you want it enabled by default
+
+Category names are case-sensitive and must match exactly between the seed script and the game settings.
+
+## `next.config.ts`
+
+```ts next.config.ts
+import type {NextConfig} from 'next';
+
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  // Allow access to remote image placeholder.
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'picsum.photos',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'api.dicebear.com',
+        port: '',
+        pathname: '/**',
+      },
+    ],
+  },
+  output: 'standalone',
+  transpilePackages: ['motion'],
+  webpack: (config, {dev}) => {
+    if (dev && process.env.DISABLE_HMR === 'true') {
+      config.watchOptions = {
+        ignored: /.*/,
+      };
+    }
+    return config;
+  },
+};
+
+export default nextConfig;
+```
+
+Key settings and what they do:
+
+| Setting | Value | Notes |
+|---|---|---|
+| `reactStrictMode` | `true` | Enables React strict mode — components render twice in development to surface side-effect bugs |
+| `eslint.ignoreDuringBuilds` | `true` | ESLint errors do not fail `next build` — run `npm run lint` separately in CI |
+| `typescript.ignoreBuildErrors` | `false` | TypeScript errors **do** fail `next build` — type safety is enforced at build time |
+| `output` | `'standalone'` | Produces a self-contained `.next/standalone` bundle suitable for Docker and PaaS deployments |
+| `transpilePackages` | `['motion']` | The `motion` animation library is transpiled by Next.js rather than treated as a pre-built ESM package |
+| `images.remotePatterns` | `picsum.photos`, `api.dicebear.com` | Allows Next.js `<Image>` to serve optimized images from these external hosts (placeholder images and avatars) |
+
+### `DISABLE_HMR`
+
+The webpack config checks for a `DISABLE_HMR=true` environment variable and disables file watching when it is set. This is a development-only optimization used in AI-assisted editing environments to prevent flickering during rapid file changes. It has no effect in production (`output: 'standalone'` builds do not include the webpack watcher).
+
+## Environment-specific Firebase configuration
+
+Running separate Firebase projects for development and production is recommended. This prevents test games from polluting production data and lets you freely experiment with Firestore rules.
+
+<Tabs>
+  <Tab title="Development">
+    Create a `.env.local` file at the project root:
+
+    ```bash
+    cp .env.example .env.local
+    ```
+
+    Fill in `.env.local` with your **development** Firebase project credentials. This file is gitignored and is never committed.
+
+    ```bash
+    npm run dev
+    ```
+
+    Next.js automatically loads `.env.local` in development.
+  </Tab>
+  <Tab title="Production">
+    Set environment variables directly in your deployment platform (Vercel, Railway, Fly.io, etc.) with your **production** Firebase project credentials.
+
+    The production Firebase project should have:
+    - Firestore in Native mode
+    - Rules deployed from `firestore.rules`
+    - Word bank seeded via `npm run seed` (pointing at the production project)
+
+    To seed against a specific project without changing your local default:
+
+    ```bash
+    FIREBASE_ADMIN_PROJECT_ID=your-prod-project \
+    FIREBASE_ADMIN_CLIENT_EMAIL=your-prod-email \
+    FIREBASE_ADMIN_PRIVATE_KEY="your-prod-key" \
+    npm run seed
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Use `npx firebase use --add` to register both your development and production projects as aliases (`default` and `prod`). You can then switch between them with `npx firebase use default` or `npx firebase use prod` when deploying rules.
+</Tip>

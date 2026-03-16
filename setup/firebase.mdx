@@ -1,0 +1,137 @@
+---
+title: "Firebase Setup"
+description: "Configure Firestore and the Firebase Admin SDK for Squiggle."
+---
+
+Squiggle uses two Firebase products:
+
+- **Firestore** — real-time database for room state, canvas sync, chat, and player presence
+- **Firebase Admin SDK** — server-side access for word validation, scoring, and seeding the word bank
+
+The client SDK (`lib/firebase.ts`) initialises Firestore for browser use. The Admin SDK (`lib/firebaseAdmin.ts`) runs in API routes and scripts where your service account credentials are never exposed to the browser.
+
+<Steps>
+  <Step title="Create a Firebase project">
+    Go to [console.firebase.google.com](https://console.firebase.google.com) and click **Add project**.
+
+    1. Enter a project name (e.g. `squiggle`).
+    2. Disable Google Analytics if you don't need it — Squiggle works without it.
+    3. Click **Create project**.
+  </Step>
+
+  <Step title="Enable Firestore in Native mode">
+    In the Firebase console, open **Build → Firestore Database** and click **Create database**.
+
+    When prompted to choose a mode, select **Native mode** — not Datastore mode. Squiggle relies on Firestore's real-time listeners which are only available in Native mode.
+
+    Choose a region close to your users (e.g. `us-central1` or `europe-west1`) and click **Enable**.
+  </Step>
+
+  <Step title="Register a web app and copy the client config">
+    In **Project Settings → General**, scroll to **Your apps** and click **Add app → Web** (`</>`). Give it a nickname (e.g. `squiggle-web`) and click **Register app**.
+
+    Firebase will show you a config object. Copy the values — you will need all of them for your `.env.local`:
+
+    ```javascript
+    const firebaseConfig = {
+      apiKey:            "AIzaSy...",
+      authDomain:        "your-project.firebaseapp.com",
+      databaseURL:       "https://your-project-default-rtdb.firebaseio.com",
+      projectId:         "your-project",
+      storageBucket:     "your-project.firebasestorage.app",
+      messagingSenderId: "123456789",
+      appId:             "1:123456789:web:abc123",
+      measurementId:     "G-XXXXXXXXXX",
+    };
+    ```
+
+    These values map directly to the `NEXT_PUBLIC_FIREBASE_*` variables in `.env.example`. See [Environment Variables](/setup/environment) for the full reference.
+  </Step>
+
+  <Step title="Generate a service account key">
+    In **Project Settings → Service Accounts**, click **Generate new private key** and confirm the download.
+
+    Firebase downloads a JSON file containing your `project_id`, `client_email`, and `private_key`. These map to the `FIREBASE_ADMIN_*` variables in `.env.example`.
+
+    <Warning>
+      The service account key grants full admin access to your Firebase project. Never commit it to source control, expose it in client-side code, or include it in any `NEXT_PUBLIC_` variable. Store it only in `.env.local` (which is gitignored) or your hosting provider's secret manager.
+    </Warning>
+  </Step>
+
+  <Step title="Deploy the Firestore security rules">
+    Squiggle ships with rules that prevent clients from reading the `wordBank` collection and enforce data shape validation on rooms, players, chat, and canvas documents.
+
+    Install the Firebase CLI if you haven't already, then deploy:
+
+    ```bash
+    npx firebase login
+    npx firebase use your-project-id
+    npx firebase deploy --only firestore:rules
+    ```
+
+    Replace `your-project-id` with the value you set for `NEXT_PUBLIC_FIREBASE_PROJECT_ID`.
+
+    The rules file at `firestore.rules` blocks all client reads and writes on `wordBank/{category}` and `rooms/{roomId}/secrets/{secretId}`:
+
+    ```javascript firestore.rules
+    // Word bank is seeded via admin SDK — clients must never read it
+    match /wordBank/{category} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /rooms/{roomId}/secrets/{secretId} {
+      // Word is stored server-side only (API route + firebase-admin).
+      // No client should ever read or write this directly.
+      allow read: if false;
+      allow write: if false;
+    }
+    ```
+  </Step>
+</Steps>
+
+## How Squiggle initialises Firebase
+
+The client SDK is initialised once in `lib/firebase.ts` and re-exported as `db`. All browser-side Firestore queries import from this module.
+
+```typescript lib/firebase.ts
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  databaseURL:       process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
+  projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket:     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId:     process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+};
+
+const app = initializeApp(firebaseConfig);
+const firestoreDb = process.env.NEXT_PUBLIC_FIREBASE_FIRESTORE_DB || '(default)';
+export const db = getFirestore(app, firestoreDb);
+```
+
+The Admin SDK is initialised in `lib/firebaseAdmin.ts` and called from server-side API routes and the seed script. The `initAdminApp()` guard prevents duplicate initialisation across hot reloads in development.
+
+```typescript lib/firebaseAdmin.ts
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+
+export function initAdminApp() {
+  if (getApps().length > 0) return;
+  initializeApp({
+    credential: cert({
+      projectId:   process.env.FIREBASE_ADMIN_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+      // Replace literal \n in env var with actual newlines
+      privateKey:  process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    }),
+  });
+}
+```
+
+<Note>
+  The `privateKey` replacement (`replace(/\\n/g, '\n')`) is required because most hosting providers and `.env` files store multi-line values with literal `\n` escape sequences rather than real newlines. The Admin SDK expects an actual PEM-formatted key.
+</Note>

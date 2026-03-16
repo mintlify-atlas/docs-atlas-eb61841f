@@ -1,0 +1,122 @@
+---
+title: "Drawing"
+description: "How drawing works in Squiggle — tools, canvas sync, word selection, hints, and skipping."
+---
+
+## The drawer's workflow
+
+<Steps>
+  <Step title="Word selection">
+    When it is your turn to draw, the game enters the `choosing` phase. You are shown `wordCount` word choices (default: 3) fetched server-side from the word bank. Other players see a waiting message — they cannot see your choices.
+
+    You have **15 seconds** to pick a word. If time runs out, the first word in the list is chosen automatically.
+  </Step>
+  <Step title="Drawing phase begins">
+    After you select a word, the phase transitions to `drawing`. The canvas is cleared, the timer starts (default: 80 seconds), and guessers see an underscore mask representing the word (e.g. `_ _ _ _ _` for a 5-letter word).
+
+    Your word is shown in the top bar (desktop) and in a floating label on tablet and mobile.
+  </Step>
+  <Step title="Draw on the canvas">
+    Use the drawing tools below the canvas to create your drawing. All strokes are synced to Firestore in real time so every other player sees your drawing as you create it.
+
+    See [Canvas tools](#canvas-tools) below for a full list of available tools.
+  </Step>
+  <Step title="Round ends">
+    The drawing phase ends when any of the following occurs:
+
+    - The timer reaches zero
+    - All non-drawer players have guessed correctly
+    - More than half of the non-drawer players have voted to skip
+
+    The game transitions to the `reveal` phase, showing the word to everyone for 5 seconds before the next turn begins.
+  </Step>
+</Steps>
+
+## Canvas tools
+
+The toolbar is only visible and interactive for the current drawer. Guessers see the canvas in read-only mode.
+
+| Tool | Icon | Description |
+|---|---|---|
+| **Pen** | `Pen` | Freehand drawing. Points are accumulated and streamed live. |
+| **Eraser** | `Eraser` | Removes pixels using `destination-out` compositing. |
+| **Fill bucket** | `PaintBucket` | Flood-fills a bounded area with the selected color. Applied immediately and saved as a stroke. |
+| **Line** | `Minus` | Draws a straight line between two points. A live preview is shown on a separate overlay canvas while dragging. |
+| **Rectangle** | `Square` | Draws a stroked rectangle. Live preview shown while dragging. |
+| **Circle** | `Circle` | Draws a stroked ellipse. Live preview shown while dragging. |
+
+Additional controls:
+
+- **Stroke size** — a range slider from **2px** to **40px**
+- **Color palette** — 18 preset colors (black, white, grays, and a full spectrum) plus a free-pick color input
+- **Undo** — removes the last completed stroke from `completedStrokes`
+- **Clear** — wipes all strokes and resets `clearedAt` to the current timestamp
+
+<Note>
+  Selecting a color while the eraser is active automatically switches the tool back to the pen.
+</Note>
+
+## Canvas sync model
+
+The canvas state is stored in a single Firestore document at `rooms/{roomId}/canvas/main` with the following shape:
+
+```typescript
+interface CanvasState {
+  completedStrokes: string;   // JSON-serialized Stroke[]
+  activeStroke: string | null; // JSON-serialized Stroke (in-progress, updated ~10 fps)
+  clearedAt: number;           // timestamp of last clear
+  lastUpdate: number;          // timestamp of last write
+}
+```
+
+Each `Stroke` carries everything needed to replay it:
+
+```typescript
+interface Stroke {
+  tool: string;                    // 'pen' | 'eraser' | 'fill' | 'circle' | 'rect' | 'line'
+  color: string;                   // hex color string
+  size: number;                    // stroke width in pixels
+  points: { x: number; y: number }[]; // coordinate path
+}
+```
+
+**How it works:**
+
+- While drawing, the drawer writes the current in-progress stroke to `activeStroke` at most every **100 ms**.
+- When a stroke is completed (mouse/touch released), it is appended to the `completedStrokes` JSON array and `activeStroke` is set to `null`.
+- All other clients subscribe to the document via `onSnapshot`. On every update they clear the canvas and redraw all `completedStrokes` in order, followed by the current `activeStroke` if one exists.
+- The canvas clears and resets at the start of each new turn.
+
+<Note>
+  `completedStrokes` is stored as a serialized JSON string, not a Firestore array. This avoids Firestore array-union conflicts and keeps all strokes in a single field write.
+</Note>
+
+## Word security
+
+The secret word is **never stored in Firestore where clients can read it**. The flow is:
+
+1. The drawer picks a word from choices returned by the server.
+2. The server stores the word in an in-memory `Map` (keyed by `roomId`) and in `rooms/{roomId}/secrets/word` — a document that Firestore security rules block all client reads on.
+3. The room document receives only the underscore mask (e.g. `_ _ _ _ _`) via `currentRound.wordMask`.
+4. Guessers only ever see the mask. There is no client-side word list — the client bundle contains only the `getWordMask` utility that converts a string to underscores.
+
+After a player guesses correctly, the server grants them access to the word via the `getWord` API action, which verifies `hasGuessed: true` before returning it.
+
+## Progressive hints
+
+If `hints` is greater than 0, the host client fires `revealHint` requests on a timer. The server picks a random hidden letter from the mask, reveals it, and writes the updated mask back to `currentRound.wordMask`.
+
+- Hints are revealed at intervals of `hintInterval` seconds (default: 20s).
+- With default settings (2 hints, 20s interval), the first letter is revealed at **20s** and a second at **40s**.
+- Spaces in multi-word answers are never masked — only alphabetic characters are replaced with underscores.
+- The top bar shows small indicator dots representing how many hints have been revealed.
+
+## Vote to skip
+
+During the drawing phase, any non-drawer player who has not yet guessed can vote to skip the current round by clicking the **skip** button in the top bar. Once more than half of the eligible guessers have voted, the round ends immediately — equivalent to the timer hitting zero.
+
+Votes are stored in `room.votes.skip` as a map of `playerId → true`. Votes reset at the start of each new turn.
+
+<Warning>
+  The drawer cannot vote to skip their own turn.
+</Warning>

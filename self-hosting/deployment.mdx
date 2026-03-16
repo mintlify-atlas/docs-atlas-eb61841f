@@ -1,0 +1,186 @@
+---
+title: "Deployment"
+description: "Deploy your own Squiggle instance to production."
+---
+
+## Prerequisites
+
+Before deploying, make sure you have:
+
+- **Node.js 20+** — required by Next.js 15 and `firebase-admin` 13
+- **A Firebase project** with Firestore enabled in Native mode and a generated service account key
+- **All environment variables** from `.env.example` filled in — see the [Environment Variables](/setup/environment) page for details
+- **Firestore rules deployed** and the **word bank seeded** (see [Firestore Rules](/self-hosting/firestore-rules))
+
+## Building the app
+
+```bash
+npm run build
+npm start
+```
+
+`next build` compiles the app in `output: 'standalone'` mode, producing a self-contained bundle in `.next/standalone` that includes only the Node.js code needed to run the server — no `node_modules` required at runtime.
+
+## Deployment options
+
+<Tabs>
+  <Tab title="Vercel (recommended)">
+    Vercel is the fastest path for Next.js. Zero-config builds, automatic `output: 'standalone'` support, and built-in environment variable management.
+
+    <Steps>
+      <Step title="Install the Vercel CLI">
+        ```bash
+        npm i -g vercel
+        ```
+      </Step>
+      <Step title="Deploy">
+        Run from the project root:
+
+        ```bash
+        vercel deploy
+        ```
+
+        Vercel detects Next.js automatically. For a production deploy:
+
+        ```bash
+        vercel deploy --prod
+        ```
+      </Step>
+      <Step title="Set environment variables">
+        In the Vercel dashboard go to **Project → Settings → Environment Variables** and add every variable from `.env.example`.
+
+        Alternatively, use the CLI to pull and push env files:
+
+        ```bash
+        # Pull existing vars (if any)
+        vercel env pull .env.production.local
+
+        # Add a variable interactively
+        vercel env add FIREBASE_ADMIN_PRIVATE_KEY production
+        ```
+
+        <Warning>
+          Never expose `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL`, or `FIREBASE_ADMIN_PRIVATE_KEY` as `NEXT_PUBLIC_` variables. These credentials give unrestricted write access to your Firebase project and must only be available to the server runtime.
+        </Warning>
+      </Step>
+      <Step title="Redeploy to pick up env vars">
+        After adding environment variables, trigger a fresh production deployment:
+
+        ```bash
+        vercel deploy --prod
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Railway / Render / Fly.io">
+    Any platform that can run a Node.js server works. The steps below apply to Railway, Render, and Fly.io — adjust the platform-specific UI as needed.
+
+    <Steps>
+      <Step title="Connect your repository">
+        Push the project to a GitHub repository and connect it to your platform of choice. Each of these services can auto-detect Next.js and run `npm run build && npm start`.
+
+        Alternatively, use the `output: 'standalone'` Dockerfile approach:
+
+        ```dockerfile
+        FROM node:20-alpine AS base
+
+        # Install dependencies
+        FROM base AS deps
+        WORKDIR /app
+        COPY package*.json ./
+        RUN npm ci
+
+        # Build
+        FROM base AS builder
+        WORKDIR /app
+        COPY --from=deps /app/node_modules ./node_modules
+        COPY . .
+        RUN npm run build
+
+        # Production image
+        FROM base AS runner
+        WORKDIR /app
+        ENV NODE_ENV=production
+        COPY --from=builder /app/.next/standalone ./
+        COPY --from=builder /app/.next/static ./.next/static
+        COPY --from=builder /app/public ./public
+        EXPOSE 3000
+        CMD ["node", "server.js"]
+        ```
+      </Step>
+      <Step title="Set environment variables">
+        In your platform's environment variable settings, add every variable from `.env.example`.
+
+        ```
+        NEXT_PUBLIC_FIREBASE_API_KEY
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+        NEXT_PUBLIC_FIREBASE_APP_ID
+        NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+        NEXT_PUBLIC_FIREBASE_FIRESTORE_DB
+        FIREBASE_ADMIN_PROJECT_ID
+        FIREBASE_ADMIN_CLIENT_EMAIL
+        FIREBASE_ADMIN_PRIVATE_KEY
+        ```
+
+        <Warning>
+          Never expose `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL`, or `FIREBASE_ADMIN_PRIVATE_KEY` as `NEXT_PUBLIC_` variables. These credentials give unrestricted write access to your Firebase project and must only be available to the server runtime.
+        </Warning>
+      </Step>
+      <Step title="Set the start command">
+        If your platform asks for a start command, use:
+
+        ```bash
+        npm run build && npm start
+        ```
+
+        Or if using the Dockerfile approach, configure a Docker deployment and point it at the `Dockerfile`.
+      </Step>
+      <Step title="Deploy">
+        Trigger your first deployment. The build step runs `next build`; the start step runs `next start` on port 3000.
+
+        Set the platform's exposed port to **3000** unless you override it with a `PORT` environment variable.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Setting environment variables in production
+
+See the [Environment Variables](/setup/environment) page for the full list. The short version:
+
+| Variable | Notes |
+|---|---|
+| `NEXT_PUBLIC_FIREBASE_*` | Client-side Firebase config — safe to expose |
+| `FIREBASE_ADMIN_PROJECT_ID` | Server-only — never prefix with `NEXT_PUBLIC_` |
+| `FIREBASE_ADMIN_CLIENT_EMAIL` | Server-only — never prefix with `NEXT_PUBLIC_` |
+| `FIREBASE_ADMIN_PRIVATE_KEY` | Server-only — see newline note below |
+
+### Handling `FIREBASE_ADMIN_PRIVATE_KEY` newlines
+
+The private key downloaded from Firebase contains literal newlines. Most deployment platforms store environment variables as single-line strings, which breaks the PEM format.
+
+Squiggle handles this automatically in `lib/firebaseAdmin.ts`:
+
+```ts
+privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+```
+
+This means you can safely paste the key with `\n` escape sequences (as it appears in the downloaded JSON) and it will be converted to real newlines at runtime. When pasting into your deployment platform's env var UI, use the raw value from the JSON file — most platforms preserve the `\n` literals as-is.
+
+<Note>
+  If your platform supports multi-line environment variables (e.g. Vercel's dashboard), you can paste the key with real newlines and it will work without the `\n` replacement.
+</Note>
+
+## Production checklist
+
+Before going live, verify each item:
+
+- [ ] Firestore rules deployed (`npx firebase deploy --only firestore:rules`)
+- [ ] Word bank seeded (`npm run seed`)
+- [ ] All environment variables set in the deployment platform
+- [ ] `FIREBASE_ADMIN_PRIVATE_KEY` either uses `\n` literals (auto-replaced at runtime) or real newlines
+- [ ] No Admin SDK credentials are in `NEXT_PUBLIC_` variables
+- [ ] Firebase Firestore is in **Native mode** (not Datastore mode)

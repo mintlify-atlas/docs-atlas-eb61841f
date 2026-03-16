@@ -1,0 +1,88 @@
+---
+title: "Environment Variables"
+description: "Configure the required environment variables for Squiggle."
+---
+
+Copy `.env.example` to `.env.local` and fill in your values before running the app or the seed script.
+
+```bash
+cp .env.example .env.local
+```
+
+## Firebase client config
+
+These variables are prefixed with `NEXT_PUBLIC_` and are bundled into the browser build. They configure the Firebase client SDK in `lib/firebase.ts`. All values come from **Project Settings → General → Your apps** in the Firebase console.
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_API_KEY" type="string" required>
+  Your Firebase project API key. Found in **Project Settings → General → Your apps → SDK setup and configuration**.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN" type="string" required>
+  The auth domain for your project. Typically `your-project-id.firebaseapp.com`.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_DATABASE_URL" type="string" required>
+  The Realtime Database URL. Typically `https://your-project-id-default-rtdb.firebaseio.com`. Required by the Firebase JS SDK even though Squiggle uses Firestore rather than the Realtime Database.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_PROJECT_ID" type="string" required>
+  Your Firebase project ID (e.g. `squiggle-prod`). Used by both the client SDK and to target the correct project when deploying Firestore rules.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET" type="string" required>
+  The default Cloud Storage bucket for your project. Typically `your-project-id.firebasestorage.app`. Required by the Firebase SDK initialisation even though Squiggle does not use Cloud Storage directly.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID" type="string" required>
+  The numeric sender ID for your project. Found alongside the other client config values in **Project Settings → General**.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_APP_ID" type="string" required>
+  The unique app ID assigned when you registered your web app. Format: `1:sender-id:web:hex-string`.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID" type="string">
+  The Google Analytics measurement ID (e.g. `G-XXXXXXXXXX`). Only present if you enabled Google Analytics for your Firebase project. Leave it out or leave it blank if you did not enable Analytics — Squiggle does not require it.
+</ParamField>
+
+<ParamField query="NEXT_PUBLIC_FIREBASE_FIRESTORE_DB" type="string">
+  A custom Firestore database ID. Leave this blank to use the `(default)` database. Only set this if you created a named database in your Firebase project (e.g. `squiggle-eu`). Corresponds to the `firestoreDb` value passed to `getFirestore()` in `lib/firebase.ts`.
+</ParamField>
+
+## Firebase Admin SDK
+
+These variables are server-side only. They are **not** prefixed with `NEXT_PUBLIC_` and are never bundled into the browser. They configure the Admin SDK in `lib/firebaseAdmin.ts` and the seed script.
+
+All three values come from the service account JSON file you download from **Project Settings → Service Accounts → Generate new private key**.
+
+<Warning>
+  Never add `FIREBASE_ADMIN_*` variables as `NEXT_PUBLIC_` variables. The service account key grants full admin access to your Firestore database, bypassing all security rules. Exposing it in the browser would allow anyone to read and write any document, including the word bank.
+</Warning>
+
+<ParamField query="FIREBASE_ADMIN_PROJECT_ID" type="string" required>
+  Your Firebase project ID. This is the same value as `NEXT_PUBLIC_FIREBASE_PROJECT_ID` — you can copy it from either source.
+</ParamField>
+
+<ParamField query="FIREBASE_ADMIN_CLIENT_EMAIL" type="string" required>
+  The service account email address from the downloaded key file. Format: `firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com`.
+</ParamField>
+
+<ParamField query="FIREBASE_ADMIN_PRIVATE_KEY" type="string" required>
+  The RSA private key from the downloaded key file. Include the full value including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` header and footer.
+
+  When pasting into `.env.local`, keep the literal `\n` escape sequences rather than adding real newlines — the app calls `.replace(/\\n/g, '\n')` to convert them at runtime.
+
+  ```bash
+  FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0B...\n-----END PRIVATE KEY-----\n"
+  ```
+</ParamField>
+
+## Security notes
+
+`.env.local` is listed in `.gitignore` by default in Next.js projects and will not be committed to source control. Never commit real credentials to a public repository.
+
+When deploying, set these variables using your hosting provider's secret or environment variable manager rather than including a `.env.local` file in your deployment artifact.
+
+<Tip>
+  If you need separate Firebase projects for development and production, maintain two `.env.local` files (e.g. `.env.local.dev` and `.env.local.prod`) locally and configure the production values in your hosting provider's dashboard.
+</Tip>

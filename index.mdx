@@ -1,97 +1,40 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Squiggle"
+description: "A minimal, real-time multiplayer draw and guess game. Create a private room, share the code, and take turns drawing while everyone else guesses."
 ---
 
-## Setting up
+# draw. guess. repeat.
 
-Get your documentation site up and running in minutes.
+Squiggle is a lightweight, open-source multiplayer drawing game built with **Next.js 15** and **Firebase**. One player draws, the rest guess — with real-time canvas sync, live chat, emoji reactions, and a server-side word bank that keeps cheating impossible.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Squiggle running locally in under 10 minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Firebase Setup" icon="database" href="/setup/firebase">
+    Configure Firestore and the Admin SDK
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="How to Play" icon="gamepad" href="/gameplay/overview">
+    Learn the game flow, rooms, drawing, and scoring
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Self-Hosting" icon="server" href="/self-hosting/deployment">
+    Deploy your own instance to production
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Key features
 
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="Real-time canvas" icon="pen-nib">
+    Drawings sync instantly across all players via Firestore's real-time listeners
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Private rooms" icon="lock">
+    6-character shareable room codes — no accounts required to join
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Host controls" icon="sliders">
+    Configure rounds, draw time, hints, word count, max players, and categories
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Cheat-proof word bank" icon="shield">
+    Words live in Firestore and are never sent to the client bundle
   </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+</CardGroup>

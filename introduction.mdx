@@ -1,0 +1,81 @@
+---
+title: "Introduction"
+description: "Squiggle is a minimal, real-time multiplayer draw and guess game. Create a private room, share the code, and take turns drawing while everyone else guesses."
+---
+
+<img
+  src="https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png"
+  alt="Squiggle"
+  width="80"
+/>
+
+# draw. guess. repeat.
+
+Squiggle is a lightweight, open-source multiplayer drawing game. One player draws, the rest guess — with real-time canvas sync, live chat, emoji reactions, and a server-side word bank that keeps cheating impossible.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Squiggle running locally in under 10 minutes
+  </Card>
+  <Card title="Firebase Setup" icon="database" href="/setup/firebase">
+    Configure Firestore and the Admin SDK
+  </Card>
+  <Card title="How to Play" icon="gamepad" href="/gameplay/overview">
+    Learn the game flow, rooms, drawing, and scoring
+  </Card>
+  <Card title="Self-Hosting" icon="server" href="/self-hosting/deployment">
+    Deploy your own instance to production
+  </Card>
+</CardGroup>
+
+## What is Squiggle?
+
+Squiggle is a real-time multiplayer drawing and guessing game built with **Next.js 15**, **Firebase Firestore**, and **TypeScript**. It's designed to be:
+
+- **Private** — rooms use 6-character codes; no public lobbies
+- **Cheat-proof** — the word bank lives entirely in Firestore, never in the client bundle
+- **Configurable** — hosts control rounds, draw time, hints, categories, and more
+- **Lightweight** — no heavy game server; all real-time state syncs through Firestore
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Real-time canvas" icon="pen-nib">
+    Drawings sync instantly across all players via Firestore's real-time listeners
+  </Card>
+  <Card title="Private rooms" icon="lock">
+    6-character shareable room codes — no accounts required to join
+  </Card>
+  <Card title="Host controls" icon="sliders">
+    Configure rounds, draw time, hints, word count, max players, and categories
+  </Card>
+  <Card title="Custom words" icon="pencil">
+    Hosts can add their own words to the word pool for each room
+  </Card>
+  <Card title="Scoring system" icon="trophy">
+    Guess-order bonuses, streaks, and drawer rewards make every round competitive
+  </Card>
+  <Card title="Progressive hints" icon="lightbulb">
+    Letters are revealed over time, keeping the game fair and exciting
+  </Card>
+  <Card title="Emoji reactions" icon="face-smile">
+    Players can send emoji reactions during rounds without interrupting guesses
+  </Card>
+  <Card title="Vote to skip" icon="forward">
+    Players can vote to skip the current word if the drawer is stuck
+  </Card>
+</CardGroup>
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Database | Firebase Firestore |
+| Server | Firebase Admin SDK |
+| Styling | Tailwind CSS v4 |
+| Language | TypeScript 5 |
+
+## License
+
+Squiggle is licensed under [AGPL v3](https://github.com/thor-op/Squiggle/blob/main/LICENSE). If you modify and deploy this software, you must open-source your changes under the same license.
