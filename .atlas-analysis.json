@@ -1,0 +1,61 @@
+{
+  "projectType": "saas",
+  "projectName": "Squiggle",
+  "projectDescription": "A minimal, real-time multiplayer draw and guess game built with Next.js and Firebase.",
+  "theme": "almond",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Setup",
+            "pages": ["setup/firebase", "setup/environment", "setup/word-bank"]
+          },
+          {
+            "group": "How to Play",
+            "pages": ["gameplay/overview", "gameplay/rooms", "gameplay/drawing", "gameplay/scoring"]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": ["self-hosting/deployment", "self-hosting/firestore-rules", "self-hosting/configuration"]
+          },
+          {
+            "group": "Contributing",
+            "pages": ["contributing/overview", "contributing/project-structure"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time canvas synced across all players via Firebase Firestore",
+    "Private rooms with 6-character shareable codes",
+    "Host controls for rounds, draw time, hints, word count, max players, and categories",
+    "Custom word support per room",
+    "Score system with guess-order bonuses and drawer rewards",
+    "Progressive hints that reveal letters over time",
+    "Emoji reactions, vote-to-skip, and live chat",
+    "Server-side word bank — players cannot cheat by reading the client bundle"
+  ],
+  "publicApiSurface": [
+    "POST /api/game { action: 'getWordChoices' } — fetch word options for drawer",
+    "POST /api/game { action: 'guess' } — validate a player's guess",
+    "POST /api/game { action: 'selectWord' } — lock in the drawer's chosen word",
+    "POST /api/game { action: 'endRound' } — end the current round",
+    "createOrJoinRoom(roomId, player) — create or join a Firestore room",
+    "startGame(roomId, players, settings) — start a game session",
+    "sendChatMessage(roomId, player, text, secretWord) — send/validate chat messages",
+    "selectWord(roomId, word, drawerId) — drawer selects a word",
+    "endRound(roomId) — trigger end-of-round flow",
+    "nextTurn(roomId, room, players) — advance to the next drawer",
+    "revealHintLetter(word, currentMask) — reveal one hidden letter in the mask"
+  ]
+}
